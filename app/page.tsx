@@ -13,7 +13,21 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScroll = useRef(true);
 
+  function getOrCreateSessionId() {
+  if (typeof window === "undefined") return null;
+
+  let sessionId = localStorage.getItem("chat_session_id");
+
+  if (!sessionId) {
+    sessionId = crypto.randomUUID();
+    localStorage.setItem("chat_session_id", sessionId);
+  }
+
+  return sessionId;
+}
 
   const sendMessage = async () => {
   if (!input.trim() || loading) return;
@@ -29,14 +43,14 @@ function getDriveFileId(url: string): string {
   return match ? match[1] : url
 }
 
-
+  const sessionId = getOrCreateSessionId();
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        message: userMessage.content,
-        history: messages,
+        chatInput: userMessage.content,
+        sessionId: sessionId,
       }),
     });
 
@@ -86,12 +100,28 @@ function getDriveFileId(url: string): string {
   }
 };
 
+useEffect(() => {
+  const container = chatContainerRef.current;
+  if (!container) return;
 
+  const handleScroll = () => {
+    const threshold = 100;
+    const isNearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+
+    shouldAutoScroll.current = isNearBottom;
+  };
+
+  container.addEventListener("scroll", handleScroll);
+  return () => container.removeEventListener("scroll", handleScroll);
+}, []);
 
 
   useEffect(() => {
+  if (shouldAutoScroll.current) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }
+}, [messages, loading]);
 
   return (
     <div className="flex h-screen">
@@ -100,7 +130,7 @@ function getDriveFileId(url: string): string {
         className={`fixed inset-y-0 left-0 transform bg-gray-50 border-r w-64 flex flex-col transition-transform duration-200 ease-in-out
         ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0 md:static`}
       >
-        <img src="https://www.callboxinc.com/wp-content/themes/enfold-child/assets/images/callbox-logo-new.svg?x57142" alt="logo" className="h-20" />
+        <img src="https://www.callboxinc.com/wp-content/themes/enfold-child/assets/images/callbox-logo-new.svg?x57142" alt="logo" className="h-20 bg-blue-300" />
         <nav className="flex-1 overflow-y-auto bg-blue-100">
           <ul className="space-y-1">
             <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">New Chat</li>
@@ -128,80 +158,111 @@ function getDriveFileId(url: string): string {
           </button>
         </header>
 
-
         {/* Messages */}
-        <main className="flex-1 overflow-y-auto mx-12 my-2 space-y-3">
-          {messages.map((msg, idx) => (
-            <div
-              key={idx}
-              className={`flex items-start gap-2 ${
-                msg.role === "user" ? "justify-end" : "justify-start"
-              }`}
-            >
-            <div className="items-center flex gap-1.5">
-                {/* Avatar */}
-                {msg.role === "assistant" && (
-                  <img
-                    src="Chat-Icon.png"
-                    alt="Assistant"
-                    className="w-16 h-16 rounded-full border"
-                  />
-                )}
-                <div
-                  className={`max-w-xl rounded-lg px-4 py-2 text-sm ${
-                    msg.role === "user"
-                      ? "bg-yellow-500 text-black"
-                      : "bg-white text-gray-800 border"
-                  }`}
-                  dangerouslySetInnerHTML={{ __html: msg.content }}
+        <main ref={chatContainerRef} className="flex-1 overflow-y-auto px-12 my-2 space-y-3">
+          {messages.length === 0 ? (
+            // Centered input when no messages
+            <div className="flex flex-col h-full items-center justify-center transition-all duration-500 ease-in-out">
+              <h1>Hello World</h1>
+              <div className="w-full max-w-lg flex gap-2">
+                <input
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+                  placeholder="Type your message…"
+                  className="flex-1 rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
-                {msg.role === "user" && (
-                  <img
-                    src="https://www.svgrepo.com/show/384670/account-avatar-profile-user.svg"
-                    alt="User"
-                    className="w-16 h-16 rounded-full border"
-                  />
-                )}
+                <button
+                  onClick={sendMessage}
+                  disabled={loading}
+                  className="rounded bg-yellow-400 px-4 py-2 text-xl text-blue-950 disabled:opacity-50"
+                >
+                  <div className="flex gap-2 items-center">
+                    <span>Send</span>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/Send_icon.svg/960px-Send_icon.svg.png" alt="icon" className="w-5 h-5"/>
+                  </div>
+                </button>
+              </div>
             </div>
-            </div>
-          ))}
+          ) : (
+            <>
+              {messages.map((msg, idx) => (
+                <div
+                  key={idx}
+                  className={`flex items-start gap-2 ${
+                    msg.role === "user" ? "justify-end" : "justify-start"
+                  }`}
+                >
+                  <div className=" flex gap-1.5">
+                    {msg.role === "assistant" && (
+                      <img
+                        src="Chat-Icon.png"
+                        alt="Assistant"
+                        className="w-16 h-16 rounded-full border"
+                      />
+                    )}
+                    <div
+                      className={`max-w-xl rounded-lg px-4 py-2 text-sm ${
+                        msg.role === "user"
+                          ? "bg-yellow-500 text-black"
+                          : "bg-white text-gray-800 border"
+                      }`}
+                      dangerouslySetInnerHTML={{ __html: msg.content }}
+                    />
+                    {msg.role === "user" && (
+                      <img
+                        src="https://www.svgrepo.com/show/384670/account-avatar-profile-user.svg"
+                        alt="User"
+                        className="w-16 h-16 rounded-full border"
+                      />
+                    )}
+                  </div>
+                </div>
+              ))}
 
-          {loading && (
-            <div className="flex items-start">
-              <img
+              {loading && (
+                <div className="flex items-start">
+                  <img
                     src="Chat-Icon.png"
                     alt="Assistant"
                     className="w-16 h-16 rounded-full border"
                   />
-              <img
-                src="https://cdn.pixabay.com/animation/2024/04/02/07/57/07-57-40-974_512.gif"
-                alt="Loading"
-                className="h-20 w-max"
-              />
-            </div>
-          )}
+                  <img
+                    src="https://cdn.pixabay.com/animation/2024/04/02/07/57/07-57-40-974_512.gif"
+                    alt="Loading"
+                    className="h-20 w-max"
+                  />
+                </div>
+              )}
 
-          <div ref={bottomRef} />
+              <div ref={bottomRef} />
+            </>
+          )}
         </main>
 
+        {/* Footer input only when messages exist */}
+        {messages.length > 0 && (
+          <footer className="border-t bg-white p-3 flex gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && sendMessage()}
+              placeholder="Type your message…"
+              className="flex-1 rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 bg-yellow-100 text-blue-950 focus:ring-indigo-500"
+            />
+            <button
+                  onClick={sendMessage}
+                  disabled={loading}
+                  className="rounded bg-yellow-400 px-4 py-2 text-xl text-blue-950 disabled:opacity-50"
+                >
+                  <div className="flex gap-2 items-center">
+                    <span>Send</span>
+                    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f2/Send_icon.svg/960px-Send_icon.svg.png" alt="icon" className="w-5 h-5"/>
+                  </div>
+              </button>
+          </footer>
+        )}
 
-        {/* Input */}
-        <footer className="border-t bg-white p-3 flex gap-2">
-          <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && sendMessage()}
-            placeholder="Type your message…"
-            className="flex-1 rounded border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          />
-          <button
-            onClick={sendMessage}
-            disabled={loading}
-            className="rounded bg-indigo-600 px-4 py-2 text-white text-sm disabled:opacity-50"
-          >
-            Send
-          </button>
-        </footer>
       </div>
     </div>
   );
