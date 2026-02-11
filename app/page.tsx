@@ -12,6 +12,8 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
 
   const sendMessage = async () => {
   if (!input.trim() || loading) return;
@@ -56,7 +58,7 @@ function getDriveFileId(url: string): string {
     ></iframe>`;
     }
     if (output.content_url) {
-      // aiMessage.content += `\n\n📄 <a href="${output.content_url}" target="_blank">Content Link</a>`;
+      aiMessage.content += `\n\n📄 <a href="${output.content_url}" target="_blank">Content Link</a>`;
       aiMessage.content += `\n\n<iframe
       src="${output.content_url}"
       class="w-full h-100 border-0 rounded-lg"
@@ -94,47 +96,94 @@ function getDriveFileId(url: string): string {
   return (
     <div className="flex h-screen">
       {/* Left Sidebar */}
-      <aside className="w-64 bg-gray-50 border-r flex flex-col">
-        <div className="p-4 font-semibold text-gray-700">Navigation</div>
-        <nav className="flex-1 overflow-y-auto">
+      <aside
+        className={`fixed inset-y-0 left-0 transform bg-gray-50 border-r w-64 flex flex-col transition-transform duration-200 ease-in-out
+        ${sidebarOpen ? "translate-x-0" : "-translate-x-full"} md:translate-x-0 md:static`}
+      >
+        <img src="https://www.callboxinc.com/wp-content/themes/enfold-child/assets/images/callbox-logo-new.svg?x57142" alt="logo" className="h-20" />
+        <nav className="flex-1 overflow-y-auto bg-blue-100">
           <ul className="space-y-1">
-            <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">Tab 1</li>
-            <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">Tab 2</li>
-            <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">Tab 3</li>
+            <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">New Chat</li>
+            <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">Chat History</li>
+            <li className="px-4 py-2 hover:bg-gray-100 cursor-pointer">Content List</li>
           </ul>
         </nav>
         <div className="p-4 border-t text-sm text-gray-500">Footer</div>
       </aside>
 
+
       {/* Right Chat Pane */}
       <div className="flex flex-col flex-1 bg-gray-100">
         {/* Header */}
-        <header className="bg-white border-b px-4 py-3 font-semibold text-gray-700">
-          AI Assistant
+        <header className="bg-yellow-200 border-b px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <img src="Chat-Icon.png" alt="logo" className="w-12 h-12 rounded-full border"/>
+            <span className="font-semibold text-gray-700 text-lg">CallBob: Your Trusted Content Creator</span>
+          </div>
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="md:hidden p-2 rounded bg-indigo-600 text-white"
+          >
+            ☰
+          </button>
         </header>
 
+
         {/* Messages */}
-        <main className="flex-1 overflow-y-auto p-4 space-y-3">
+        <main className="flex-1 overflow-y-auto mx-12 my-2 space-y-3">
           {messages.map((msg, idx) => (
             <div
               key={idx}
-              className={`max-w-xl rounded-lg px-4 py-2 text-sm ${
-                msg.role === "user"
-                  ? "ml-auto bg-indigo-500 text-white"
-                  : "mr-auto bg-white text-gray-800 border"
+              className={`flex items-start gap-2 ${
+                msg.role === "user" ? "justify-end" : "justify-start"
               }`}
-              dangerouslySetInnerHTML={{ __html: msg.content }}
-            />
+            >
+            <div className="items-center flex gap-1.5">
+                {/* Avatar */}
+                {msg.role === "assistant" && (
+                  <img
+                    src="Chat-Icon.png"
+                    alt="Assistant"
+                    className="w-16 h-16 rounded-full border"
+                  />
+                )}
+                <div
+                  className={`max-w-xl rounded-lg px-4 py-2 text-sm ${
+                    msg.role === "user"
+                      ? "bg-yellow-500 text-black"
+                      : "bg-white text-gray-800 border"
+                  }`}
+                  dangerouslySetInnerHTML={{ __html: msg.content }}
+                />
+                {msg.role === "user" && (
+                  <img
+                    src="https://www.svgrepo.com/show/384670/account-avatar-profile-user.svg"
+                    alt="User"
+                    className="w-16 h-16 rounded-full border"
+                  />
+                )}
+            </div>
+            </div>
           ))}
 
           {loading && (
-            <div className="mr-auto bg-white px-4 py-2 rounded text-sm text-gray-400 border">
-              Thinking…
+            <div className="flex items-start">
+              <img
+                    src="Chat-Icon.png"
+                    alt="Assistant"
+                    className="w-16 h-16 rounded-full border"
+                  />
+              <img
+                src="https://cdn.pixabay.com/animation/2024/04/02/07/57/07-57-40-974_512.gif"
+                alt="Loading"
+                className="h-20 w-max"
+              />
             </div>
           )}
 
           <div ref={bottomRef} />
         </main>
+
 
         {/* Input */}
         <footer className="border-t bg-white p-3 flex gap-2">
