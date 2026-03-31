@@ -3,12 +3,25 @@
 import { useEffect, useRef, useState, memo } from "react";
 import { supabase } from "@/lib/supabase";
 
-
 type Message = {
   id: string;
   role: "user" | "assistant";
   content: string;
+  postUrl?: string;
+  contentUrl?: string;
+  imageUrl?: string;
 };
+
+type Session = {
+  id: number;
+  session_id: string;
+  chat_title: string;
+};
+
+function getDriveFileId(url: string): string {
+  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return match ? match[1] : url;
+}
 
 const ChatMessage = memo(function ChatMessage({ msg }: { msg: Message }) {
   return (
@@ -32,8 +45,51 @@ const ChatMessage = memo(function ChatMessage({ msg }: { msg: Message }) {
               ? "bg-yellow-500 text-black"
               : "bg-white text-gray-800 border"
           }`}
-          dangerouslySetInnerHTML={{ __html: msg.content }}
-        />
+        >
+          <div className="whitespace-pre-wrap">{msg.content}</div>
+
+          {msg.postUrl && (
+            <iframe
+              src={msg.postUrl}
+              loading="lazy"
+              className="w-full h-96 border-0 rounded-lg mt-2"
+              allow="autoplay"
+            />
+          )}
+
+          {msg.contentUrl && (
+            <>
+              <div className="mt-2">
+                📄{" "}
+                <a
+                  href={msg.contentUrl}
+                  target="_blank"
+                  className="underline"
+                >
+                  Content Link
+                </a>
+              </div>
+
+              <iframe
+                src={msg.contentUrl}
+                loading="lazy"
+                className="w-full h-96 border-0 rounded-lg mt-2"
+                allow="autoplay"
+              />
+            </>
+          )}
+
+          {msg.imageUrl && (
+            <iframe
+              src={`https://drive.google.com/file/d/${getDriveFileId(
+                msg.imageUrl
+              )}/preview`}
+              loading="lazy"
+              className="w-full h-96 border-0 rounded-lg mt-2"
+              allow="autoplay"
+            />
+          )}
+        </div>
 
         {msg.role === "user" && (
           <img
@@ -57,191 +113,126 @@ export default function ChatPage() {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const shouldAutoScroll = useRef(true);
 
-  const [sessions, setSessions] = useState<string[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [currentSessionId, setCurrentSessionId] = useState<number | null>(null);
+  const [currentSessionUuid, setCurrentSessionUuid] = useState<string | null>(
+    null
+  );
 
-  function getOrCreateSessionId() {
-    if (typeof window === "undefined") return null;
-
-    let sessionId = localStorage.getItem("chat_session_id");
-
-    if (!sessionId) {
-      sessionId = crypto.randomUUID();
-      localStorage.setItem("chat_session_id", sessionId);
-    }
-
-    return sessionId;
-  }
-
-  useEffect(() => {
-  const loadSessions = async () => {
-    const { data, error } = await supabase
-      .from("AIChatHistory")
-      .select("session_id")
-      .order("date", { ascending: false });
-
-    if (error) {
-      console.error("Failed loading sessions", error);
-      return;
-    }
-
-    // Remove duplicates
-    const uniqueSessions = [
-      ...new Set(data.map((row: any) => row.session_id)),
-    ];
-
-    setSessions(uniqueSessions);
-
-    // Auto load first session
-    if (uniqueSessions.length > 0) {
-      loadMessages(uniqueSessions[0]);
-    }
+  const createNewChat = () => {
+    const newSessionUuid = crypto.randomUUID(); // Generate a new session ID
+    setMessages([]);
+    setCurrentSessionId(null);       // No database row yet
+    setCurrentSessionUuid(newSessionUuid); // In-memory session
   };
 
-  loadSessions();
-}, []);
+  useEffect(() => {
+    const loadSessions = async () => {
+      const { data } = await supabase
+        .from("Chat_Title")
+        .select("id, session_id, chat_title")
+        .order("id", { ascending: false });
 
-const loadMessages = async (sessionId: string) => {
-  setCurrentSessionId(sessionId);
+      setSessions(data ?? []);
+      createNewChat();
+    };
 
-  const { data, error } = await supabase
-    .from("AIChatHistory")
-    .select("*")
-    .eq("session_id", sessionId)
-    .order("id", { ascending: true });
+    loadSessions();
+  }, []);
 
-  if (error) {
-    console.error("Failed to load messages", error);
-    return;
-  }
+  const loadMessages = async (session: Session) => {
+    setCurrentSessionId(session.id);
+    setCurrentSessionUuid(session.session_id);
 
-  setMessages(
-    data.map((row: any) => {
-    let content = row.input ?? "";
+    const { data, error } = await supabase
+      .from("AIChatHistory")
+      .select(
+        `
+        id,
+        input,
+        user_input,
+        post_url,
+        content_url,
+        image_url
+      `
+      )
+      .eq("session_chat_id", session.id)
+      .order("id", { ascending: true })
+      .limit(50);
 
-    // Rebuild iframe for assistant messages
-    if (!row.user_input) {
-      if (row.post_url) {
-        content += `
-        <iframe
-          src="${row.post_url}"
-          class="w-full h-96 border-0 rounded-lg"
-        ></iframe>`;
-      }
+    if (error) return;
 
-      if (row.content_url) {
-        content += `
-        📄 <a href="${row.content_url}" target="_blank">Content Link</a>
-        <iframe
-          src="${row.content_url}"
-          class="w-full h-96 border-0 rounded-lg"
-        ></iframe>`;
-      }
-
-      if (row.image_url) {
-        const imageId = row.image_url.match(/\/d\/([a-zA-Z0-9_-]+)/)?.[1] ?? row.image_url;
-
-        content += `
-        <iframe
-          src="https://drive.google.com/file/d/${imageId}/preview"
-          class="w-full h-96 border-0 rounded-lg"
-        ></iframe>`;
-      }
-    }
-
-    return {
+    const formatted: Message[] = data.map((row: any) => ({
       id: row.id.toString(),
       role: row.user_input ? "user" : "assistant",
-      content,
-    };
-  })
-  );
-};
+      content: row.input ?? "",
+      postUrl: row.post_url ?? undefined,
+      contentUrl: row.content_url ?? undefined,
+      imageUrl: row.image_url ?? undefined,
+    }));
 
-  function getDriveFileId(url: string): string {
-    const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-    return match ? match[1] : url;
-  }
+    setMessages(formatted);
+  };
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
 
+    const userText = input.trim();
+
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
-      content: input.trim(),
+      content: userText,
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setLoading(true);
 
-    const sessionId = currentSessionId || getOrCreateSessionId();
-    await supabase
-    .from('AIChatHistory')
-    .insert({
-      session_id: sessionId,
-      input: input.trim(),
-      timestamp: new Date().toTimeString().split(' ')[0], // or leave null
-      date: new Date().toISOString().slice(0, 10),
-      user_input: true
-    })
     try {
+        // ✅ INSERT USER MESSAGE IMMEDIATELY (RESTORED)
+        if (currentSessionId) {
+          await supabase.from("AIChatHistory").insert({
+            session_chat_id: currentSessionId,
+            input: userText,
+            timestamp: new Date().toTimeString().split(" ")[0],
+            date: new Date().toISOString().slice(0, 10),
+            user_input: true,
+          });
+        } else {
+          // Insert without session_chat_id if it doesn’t exist
+          await supabase.from("AIChatHistory").insert({
+            input: userText,
+            timestamp: new Date().toTimeString().split(" ")[0],
+            date: new Date().toISOString().slice(0, 10),
+            user_input: true,
+          });
+        }
+
+      // 🔥 Call AI
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chatInput: userMessage.content,
-          sessionId,
+          chatInput: userText,
+          sessionId: currentSessionUuid,
         }),
       });
 
       const data = await res.json();
       const output = data.output ?? {};
 
-      let aiContent = output.ai_output ?? "No response from AI";
-
-      if (output.post_url) {
-        aiContent += `
-
-<iframe
-  src="${output.post_url}"
-  class="w-full h-96 border-0 rounded-lg"
-  allow="autoplay"
-></iframe>`;
-      }
-
-      if (output.content_url) {
-        aiContent += `
-
-📄 <a href="${output.content_url}" target="_blank">Content Link</a>
-
-<iframe
-  src="${output.content_url}"
-  class="w-full h-96 border-0 rounded-lg"
-  allow="autoplay"
-></iframe>`;
-      }
-
-      if (output.image_url) {
-        const imageId = getDriveFileId(output.image_url);
-        aiContent += `
-
-<iframe
-  src="https://drive.google.com/file/d/${imageId}/preview"
-  class="w-full h-96 border-0 rounded-lg"
-  allow="autoplay"
-></iframe>`;
-      }
-
       const aiMessage: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
-        content: aiContent,
+        content: output.ai_output ?? "No response from AI",
+        postUrl: output.post_url ?? undefined,
+        contentUrl: output.content_url ?? undefined,
+        imageUrl: output.image_url ?? undefined,
       };
 
       setMessages((prev) => [...prev, aiMessage]);
-    } catch (err) {
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
@@ -254,6 +245,7 @@ const loadMessages = async (sessionId: string) => {
       setLoading(false);
     }
   };
+
 
   useEffect(() => {
     const container = chatContainerRef.current;
@@ -296,25 +288,20 @@ const loadMessages = async (sessionId: string) => {
           <ul className="space-y-1">
             <li
               className="px-4 py-2 hover:bg-gray-100 cursor-pointer font-semibold"
-              onClick={() => {
-                const newSession = crypto.randomUUID();
-                localStorage.setItem("chat_session_id", newSession);
-                setMessages([]);
-                setCurrentSessionId(newSession);
-              }}
+              onClick={createNewChat}
             >
               + New Chat
             </li>
 
             {sessions.map((session) => (
               <li
-                key={session}
+                key={session.id}
                 onClick={() => loadMessages(session)}
                 className={`px-4 py-2 cursor-pointer hover:bg-gray-200 ${
-                  currentSessionId === session ? "bg-gray-300" : ""
+                  currentSessionId === session.id ? "bg-gray-300" : ""
                 }`}
               >
-                {session.slice(0, 8)}...
+                {session.chat_title ?? "Untitled Chat"}
               </li>
             ))}
           </ul>
@@ -324,7 +311,7 @@ const loadMessages = async (sessionId: string) => {
 
       {/* Chat Pane */}
       <div className="flex flex-col flex-1 bg-gray-100">
-        {/* Header */}
+        {/* Header (UNCHANGED) */}
         <header className="bg-yellow-200 border-b px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-1">
             <img
@@ -332,9 +319,14 @@ const loadMessages = async (sessionId: string) => {
               alt="logo"
               className="w-12 h-12 rounded-full border"
             />
-            <span className="font-semibold text-gray-700 text-lg">
-              CallBob: Your Trusted Content Creator
-            </span>
+            <div>
+              <span className="font-semibold text-gray-700 text-lg">
+                CallBob: Your Trusted Content Creator
+              </span>
+              <h1 className="text-sm text-gray-600">
+                Session ID: {currentSessionId ?? "None"}
+              </h1>
+            </div>
           </div>
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
